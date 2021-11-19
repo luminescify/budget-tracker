@@ -1,52 +1,73 @@
-const pendingObjectStoreName = `pending`;
-const request = indexedDB.open(`budget`, 2);
+let db;
+let budgetVersion;
 
-request.onupgradeneeded = e => {
-    const db = request.result;
-    console.log(e);
-    if(!db.objectStoreNames.contains(pendingObjectStoreName)) {
-        db.createObjectStore(pendingObjectStoreName, { autoIncrement: true });
+const request = indexedDB.open('BudgetDB', budgetVersion || 21);
+
+request.onupgradeneeded = function (e) {
+    console.log('Upgrade needed in IndexDB');
+
+    const { oldVersion } = e;
+    const newVersion = e.newVersion || db.version;
+
+    console.log(`DB Updated from version ${oldVersion} to ${newVersion}`);
+
+    db = e.target.result;
+
+    if (db.objectStoreNames.length === 0) {
+        db.createdObjectStore('BudgetStore', { autoIncrement: true });
     }
 };
 
-request.onsuccess = e => {
-    console.log(`Success! ${e.type}`);
-    if (navigator.onLine) {
-        checkDB();
+request.onerror = function (e) {
+    console.log(`Woops! ${e.target.errorCode}`);
+  };
+  
+function checkDatabase() {
+console.log('check db invoked');
+
+let transaction = db.transaction(['BudgetStore'], 'readwrite');
+
+const store = transaction.objectStore('BudgetStore');
+
+const getAll = store.getAll();
+
+getAll.onsuccess = function () {
+    if (getAll.result.length > 0) {
+    fetch('/api/transaction/bulk', {
+        method: 'POST',
+        body: JSON.stringify(getAll.result),
+        headers: {
+        Accept: 'application/json, text/plain, */*',
+        'Content-Type': 'application/json',
+        },
+    })
+        .then((response) => response.json())
+        .then((res) => {
+        if (res.length !== 0) {
+            transaction = db.transaction(['BudgetStore'], 'readwrite');
+            const currentStore = transaction.objectStore('BudgetStore');
+            currentStore.clear();
+            }
+        });
     }
 };
-
-request.onerror = e => console.error(e);
-
-function checkDB() {
-    const db = request.result;
-    let transaction = db.transaction([pendingObjectStoreName], `readwrite`);
-    let store = transaction.objectStore(pendingObjectStoreName);
-    const getAll = store.getAll();
-    getAll.onsuccess = () => {
-        if (getAll.result.length > 0) {
-            fetch(`/api/transaction/bulk`, {
-                method: `POST`,
-                body: JSON.stringify(getAll.result),
-                headers: {
-                    Accept: `application/json, text/plain, */*`,
-                    "Content-Type": `application/json`
-                }
-            }) .then(response => response.json())
-               .then(() => {
-                   transaction = db.transaction([pendingObjectStoreName], `readwrite`);
-                   store = transaction.objectStore(pendingObjectStoreName);
-                   store.clear();
-               });
-        }
-    }
-};
-
-function saveTransactions(transaction) {
-    const db = request.result;
-    const transaction = db.transaction([pendingObjectStoreName], `readwrite`);
-    const store = transaction.objectStore(pendingObjectStoreName);
-    store.add(transaction);
 }
 
-window.addEventListener(`online`, checkDB);
+request.onsuccess = function (e) {
+console.log('success');
+db = e.target.result;
+
+if (navigator.onLine) {
+    console.log('The backend is online');
+    checkDatabase();
+}
+};
+
+const saveRecord = (record) => {
+console.log('Save record invoked');
+const transaction = db.transaction(['BudgetStore'], 'readwrite');
+const store = transaction.objectStore('BudgetStore');
+store.add(record);
+};
+
+window.addEventListener(`online`, checkDatabase);
