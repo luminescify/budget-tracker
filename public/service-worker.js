@@ -31,6 +31,42 @@ self.addEventListener(`activate`, e => {
             ) .then (deleteCaches => 
                 Promise.all(
                     deleteCaches.map(deleteCaches => caches.delete(deleteCaches))
-            ))
-    )
-})
+            )
+        ) .then(() => self.clients.claim())
+    );
+});
+
+self.addEventListener(`fetch`, e => {
+    if (
+        e.request.method !== `GET` || !e.request.url.startsWith(self.location.origin)
+    ) {
+        e.respondWith(fetch(e.request));
+        return;
+    }
+
+    if (e.request.url.includes(`/api/transaction`)) {
+        e.respondWith(
+            caches.open(RUNTIME_CACHE).then(cache =>
+                fetch(e.request)
+                    .then (response => {
+                        cache.put(e.request, response.clone());
+                        return response;
+                }).catch(() => caches.match(e.request))
+            )
+        );
+        return;
+    }
+    e.respondWith(
+        caches.match(e.request).then(cachedResponse => {
+            if(cachedResponse) {
+                return cachedResponse;
+            }
+            return caches
+                .open(RUNTIME_CACHE)
+                .then(cache =>
+                    fetch(e.request).then(response =>
+                        cache.put(e.request, response.clone()).then(() => response)
+                    ));
+        })
+    );
+});
